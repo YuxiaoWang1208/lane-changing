@@ -214,19 +214,9 @@ class AbstractEnv(gym.Env):
             raise NotImplementedError("The road and vehicle must be initialized in the environment implementation")
 
         self.steps += 1
-        longi_action = self._longi_rule()
-        if longi_action == "BREAK":
-            action = 1
-            self._simulate(longi_action)
-        elif longi_action == "FASTER":
-            action = 1
-            self._simulate(longi_action)
-        elif longi_action == "IDLE":
-            self._simulate(action)
-        elif longi_action == "SLOWER" and action != 1:
-            self._simulate(action)
-        elif longi_action == "SLOWER" and action == 1:
-            self._simulate(longi_action)
+        # if self._e_break():
+        #     action = 6
+        self._simulate(action)
 
         obs = self.observation_type.observe()
         reward = self._reward(action)
@@ -235,42 +225,18 @@ class AbstractEnv(gym.Env):
 
         return obs, reward, terminal, info
 
-    def _longi_rule(self):
+    def _e_break(self):
         """
-        Perform a rule-based longitudinal action.
+        Perform an emergency break action while there's a car in the near front.
         """
         # obs = self.observation_type.observe()
         cars = self.observation_type.state()
-        threshold1 = 60  # 低于此阈值不能加速
-        threshold2 = 30  # 低于此阈值必须减速
-        threshold3 = 20  # 低于此阈值进行紧急刹车
-
-        car_forward_near = None
-        car_back_near = None
-        longi_action = "FASTER"
+        threshold = 15  # 低于此阈值进行紧急刹车
         for car in cars[1:]:
-            if abs(car[2]) < 0.1:
-                if car[1] > 0:
-                    if car_forward_near is None:
-                        car_forward_near = car
-                    elif car[1] < car_forward_near[1]:
-                        car_forward_near = car
-                # elif car[1] < 0:
-                #     if car_back_near is None:
-                #         car_back_near = car
-                #     elif car[1] > car_back_near[1]:
-                #         car_back_near = car
-                if threshold3 > car[1] > 0:
-                    longi_action = "BREAK"
-                    return longi_action  # 紧急刹车
-
-        if car_forward_near is None:
-            return longi_action
-        if car_forward_near[1] + car_forward_near[3] * 1/policy_frequency < threshold1:
-            longi_action = "IDLE"
-            if car_forward_near[1] + car_forward_near[3] * 1/policy_frequency < threshold2:
-                longi_action = "SLOWER"
-        return longi_action
+            # 同车道前车
+            if threshold > car[1] > 0 and abs(car[2]) < 0.2:
+                return True
+        return False
 
     def rule(self):
         """
@@ -278,18 +244,75 @@ class AbstractEnv(gym.Env):
         Return available safe ones.
         """
         cars = self.observation_type.state()
-        available_actions = [0, 1, 2]
-        threshold1 = 80  # 左右前车低于此阈值不能随意换道
+        # ego_car = cars[0]
+        available_actions = [0, 1, 2, 3, 4]
+        threshold1 = 20  # 前车低于此阈值必须减速
+        threshold2 = 15  # 左右车辆车距低于此阈值不能随意换道或加速
+
+        # for car in cars[1:]:
+        #     # 左侧车道
+        #     if -0.2 > car[2] > -0.6:
+        #         if abs(car[1]) < threshold1 or \
+        #                 car[1] > 0 and car[1] + car[3] * 1 < threshold1:
+        #             if 0 in available_actions:
+        #                 available_actions.remove(0)
+        #     # 右侧车道
+        #     if 0.6 > car[2] > 0.2:
+        #         if abs(car[1]) < threshold1 or \
+        #                 car[1] > 0 and car[1] + car[3] * 1 < threshold1:
+        #             if 2 in available_actions:
+        #                 available_actions.remove(2)
+        #     # 当前车道
+        #     if abs(car[2]) < 0.2:
+        #         if car[1] > 0 and car[1] + car[3] * 1 < threshold1:
+        #             if 3 in available_actions:
+        #                 available_actions.remove(3)
+        #         if abs(car[1]) < threshold2 or \
+        #                 car[1] > 0 and car[1] + car[3] * 1 < threshold2:
+        #             if 1 in available_actions:
+        #                 available_actions.remove(1)
+
+        # for car in cars[1:]:
+        #     if car[1] > 0 and 0 > car[2] > -0.5 and \
+        #             car[1] + car[3] * 1/policy_frequency < threshold1:
+        #         if 0 in available_actions:
+        #             available_actions.remove(0)
+        #     if car[1] > 0 and 0.5 > car[2] > 0 and \
+        #             car[1] + car[3] * 1/policy_frequency < threshold1:
+        #         if 2 in available_actions:
+        #             available_actions.remove(2)
+        #     if car[1] > 0 and abs(car[2]) < 0.2 and \
+        #             car[1] + car[3] * 1/policy_frequency < threshold1:
+        #         if 3 in available_actions:
+        #             available_actions.remove(3)
+        #     if car[1] > 0 and abs(car[2]) < 0.2 and \
+        #             car[1] + car[3] * 1/policy_frequency < threshold2:
+        #         if 1 in available_actions:
+        #             available_actions.remove(1)
+        #         if 3 in available_actions:
+        #             available_actions.remove(3)
 
         for car in cars[1:]:
-            if -0.3 > car[2] > -0.5 and \
-                    abs(car[1] + car[3] * 1/policy_frequency) < threshold1:
-                if 0 in available_actions:
-                    available_actions.remove(0)
-            if 0.5 > car[2] > 0.3 and \
-                    abs(car[1] + car[3] * 1/policy_frequency) < threshold1:
-                if 2 in available_actions:
-                    available_actions.remove(2)
+            # 左侧车道
+            if -2 > car[2] > -6:
+                if abs(car[1]) < threshold2 or \
+                        car[1] > 0 and car[1] + car[3] * 2/policy_frequency < 0:
+                    if 0 in available_actions:
+                        available_actions.remove(0)
+            # 右侧车道
+            if 6 > car[2] > 2:
+                if abs(car[1]) < threshold2 or \
+                        car[1] > 0 and car[1] + car[3] * 2/policy_frequency < 0:
+                    if 2 in available_actions:
+                        available_actions.remove(2)
+            # 当前车道
+            if abs(car[2]) < 2:
+                if  0 < car[1] < threshold1 or \
+                        car[1] > 0 and car[1] + car[3] * 2/policy_frequency < 0:
+                    if 3 in available_actions:
+                        available_actions.remove(3)
+                    if 1 in available_actions:
+                        available_actions.remove(1)
 
         side_lanes = self.road.network.side_lanes(self.vehicle.lane_index)
         lane_index = self.vehicle.lane_index

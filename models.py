@@ -9,14 +9,16 @@ from configuration import Configurable
 class DQN(nn.Module):
     def __init__(self):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(35, 64)
+        self.fc1 = nn.Linear(25, 256)  # (25, 64)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(64, 256)
-        self.fc3 = nn.Linear(256, 3)
+        self.fc2 = nn.Linear(256, 256)  # (64, 256)
+        self.fc3 = nn.Linear(256, 5)
 
     def forward(self, x):
-        y = self.relu(self.fc1(x))
-        y = self.relu(self.fc2(y))
+        # y = self.relu(self.fc1(x))
+        # y = self.relu(self.fc2(y))
+        y = F.tanh(self.fc1(x))
+        y = F.tanh(self.fc2(y))
         y = self.fc3(y)
         return y
 

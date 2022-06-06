@@ -1,6 +1,8 @@
 from typing import Tuple
 
 import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 from highway_env.road.road import Road
