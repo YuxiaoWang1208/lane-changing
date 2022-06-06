@@ -242,10 +242,10 @@ class MDPVehicle(ControlledVehicle):
         """
         if action == "FASTER":
             self.speed_index = self.speed_to_index(self.speed) + 1
+        # elif action == "SLOWER":
+        #     self.speed_index = self.speed_to_index(self.speed) - 1
         elif action == "SLOWER":
-            self.speed_index = self.speed_to_index(self.speed) - 1
-        elif action == "BREAK":
-            self.target_speed = max(15.0, self.target_speed - 5)
+            self.target_speed = max(18.0, self.target_speed - 5)
             super().act()
             return
         else:

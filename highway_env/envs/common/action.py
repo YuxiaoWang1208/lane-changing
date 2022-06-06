@@ -225,10 +225,10 @@ class DiscreteMetaAction(ActionType):
         return functools.partial(MDPVehicle, target_speeds=self.target_speeds)
 
     def act(self, action) -> None:
-        if type(action) == int:
-            self.controlled_vehicle.act(self.actions[action])
-        elif type(action) == str:
-            self.controlled_vehicle.act(action)
+        # if action == 6 or action == 4:
+        #     self.controlled_vehicle.act("BREAK")
+        # else:
+        self.controlled_vehicle.act(self.actions[action])
 
 
 class MultiAgentAction(ActionType):

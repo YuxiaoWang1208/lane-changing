@@ -10,21 +10,24 @@ import torch.nn.functional as F
 import torch.optim as optim
 from models import *
 
+'''
+Agent学习5种换道&跟车动作，结合规则约束
+'''
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["SDL_VIDEODRIVER"] ="dummy"  #华为云训练和测试需要
 # hyper-parameters
 # 设置超参数
 TARGET_FREQ = 40  # target network update frequency
-GAMMA = 0.95
-INITIAL_EPSILON = 0.7
+GAMMA = 0.8  # 0.95
+INITIAL_EPSILON = 1
 MIN_EPSILON = 0.01
-DECAY = 0.996
+DECAY = 0.98  # 0.995 0.99
 LR = 5e-4
-MEMORY_SIZE = 1000
+MEMORY_SIZE = 8000
 EXPLORE = 10000
-LEARN_FREQ = 4
-BATCH_SIZE = 2
+LEARN_FREQ = 1
+BATCH_SIZE = 128  # 32
 
 class ReplayBuffer(object):
     # 在此编写经验回放
@@ -62,9 +65,13 @@ class DQNAgent:
         self.epsilon = epsilon
         self.memory_buffer = ReplayBuffer(memory_size)
         self.action_space = self.env.action_space
-        self.loss_func = nn.MSELoss()
+        # self.loss_func = nn.MSELoss()
         self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
         self.learn_step_counter = 0
+        self.max_grad_norm = 10
+        for m in self.net.modules():
+            if isinstance(m, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d)):
+                torch.nn.init.xavier_uniform_(m.weight)
 
     # def choose_action(self, state):
     #     x = state.flatten()
@@ -80,8 +87,11 @@ class DQNAgent:
     def choose_action(self, state):
         x = state.flatten()
         x = torch.FloatTensor(x)
+        # actions_value = [0, 0, 0, 0, 0]
+        # available_actions = [0, 1, 2, 3, 4]
         if np.random.uniform() < 1 - self.epsilon:
             actions_value = self.net.forward(x).tolist()  # 计算状态行动价值
+            # print(actions_value)
             available_actions = self.env.rule()
             available_actions_value = []
             l_a = len(available_actions)
@@ -91,10 +101,29 @@ class DQNAgent:
             # action = torch.max(actions_value, -1)[1].data.numpy()
             # action = action.max()
         else:
-            available_actions = self.env.rule()
-            action_index = np.random.randint(0, len(available_actions))
-            action = available_actions[action_index]
+            # available_actions = self.env.rule()
+            # action_index = np.random.randint(0, len(available_actions))
+            action = np.random.randint(0, self.action_space.n)
+            # action = available_actions[action_index]
         return action
+
+    # def choose_action(self, state):
+    #     x = state.flatten()
+    #     x = torch.FloatTensor(x)
+    #     # 计算状态行动价值，添加了随机噪声扰动
+    #     actions_value_0 = self.net.forward(x).tolist()
+    #     actions_value_1 = ( np.random.randn(self.env.action_space.n) * (1. / (self.learn_step_counter/100 + 1)) ).tolist()
+    #     actions_value = np.sum([actions_value_0, actions_value_1], axis=0).tolist()
+    #     # actions_value = self.net.forward(x).tolist()
+    #     available_actions = self.env.rule()
+    #     available_actions_value = []
+    #     l_a = len(available_actions)
+    #     for i in range(l_a):
+    #         available_actions_value.append(actions_value[available_actions[i]])
+    #     action = actions_value.index(max(available_actions_value))
+    #     # action = torch.max(actions_value, -1)[1].data.numpy()
+    #     # action = action.max()
+    #     return action
 
     def learn(self, batch_size):
         if self.memory_buffer.size() > batch_size:
@@ -112,12 +141,20 @@ class DQNAgent:
 
             with torch.no_grad():
                 q_next = self.target_net.forward(next_states)
-                q_target = rewards + (1-dones) * GAMMA * torch.max(q_next, dim=1, keepdim=True)[0]
+                q1 = torch.max(q_next, dim=1, keepdim=True)
+                q2 = q1[0]
+                q2 = q2[:, 0]
+                q_target = rewards + (1-dones) * GAMMA * q2
             q = self.net.forward(states)
-            q = q.squeeze(1).gather(1, actions.unsqueeze(1).to(torch.int64))
-            loss = self.loss_func(q, q_target)
+            q = q.squeeze(1).gather(1, actions.unsqueeze(1).to(torch.int64)).squeeze(1)
+            # loss = self.loss_func(q, q_target)
+            # Compute Huber loss (less sensitive to outliers)
+            loss = F.smooth_l1_loss(q, q_target)
+            # Optimize the policy
             self.optimizer.zero_grad()
             loss.backward()
+            # Clip gradient norm
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
             self.optimizer.step()
             return loss
         else:
@@ -173,36 +210,9 @@ def train(args=None):
     #     return
     # traffic_manager = client.get_trafficmanager(8000)
 
-    env_config = {
-                "id": "highway-v0",
-                "import_module": "highway_env",
-                "lanes_count": 3,
-                "vehicles_count": 40,   # 环境车数量
-                "duration": 50,         #每个episode的step数
-                "other_vehicles_type": "highway_env.vehicle.behavior.IDMVehicle",
-                "observation": {
-                    "type": "Kinematics",
-                    "vehicles_count": 5,  # 15
-                    "features": ["presence", "x", "y", "vx", "vy", "cos_h", "sin_h"],
-                    "features_range": {
-                        "x": [-100, 100],
-                        "y": [-100, 100],
-                        "vx": [-20, 20],
-                        "vy": [-20, 20]
-                    },
-                    # "absolute": True,
-                    "order": "shuffled"
-                },
-                "action": {
-                    "type": "DiscreteMetaAction",
-                    "longitudinal": False
-                },
-                "screen_width": 600,  # [px]
-                "screen_height": 150,  # [px]
-                # "destination": "o1"
-            }
     env = gym.make("highway-fast-v0")
-    env.unwrapped.configure(env_config)
+    # env.unwrapped.configure(env_config)
+    env.configure({"duration": 100, "vehicles_count": 20})
     # env = gym.make("CartPole-v0")
     # env = env.unwrapped
     env.reset()
@@ -210,22 +220,22 @@ def train(args=None):
 
     # directory = './weights_with_ego_attention/'
     # dqn.writer = SummaryWriter(directory)
-    print(env.action_space.n)
+    # print(env.action_space.n)
     dqn = DQNAgent(env)
-    episodes = 1000  #尝试不同episodes结果   1000-2000
+    episodes = 500  #尝试不同episodes结果
     print("Collecting Experience....")
 
 
     # 打开记录指标文件
-    log_file = open("train_log_v1.txt", 'w')
+    log_file = open("train_log_v7.txt", 'w')
     log_file.write("avg_steps, avg_reward, "
                    "success_rate, avg_speed, avg_laneChange\n")
     # 初始化指标记录容器
-    avg_len = 10  # 求平均值的窗长为10
+    avg_len = 20  # 求平均值的窗长为10
     avg_counter = 0
     steps_list = np.zeros(avg_len)
     reward_list = np.zeros(avg_len)
-    success_eps = 0
+    success_list = np.zeros(avg_len)
     speed_list = np.zeros(avg_len)
     laneChange_list = np.zeros(avg_len)
     for i in range(episodes):
@@ -247,6 +257,9 @@ def train(args=None):
             next_state, reward, done, info = env.step(action)
             env.render()
             dqn.memory_buffer.add((state.flatten(), action, reward, next_state.flatten(), done))
+            # for ai in range(env.action_space.n):
+            #     if ai not in available_actions:
+            #         dqn.memory_buffer.add((state.flatten(), ai, reward - 0.1, next_state.flatten(), done))
             state = next_state
             # 需要记录的指标
             ep_reward += reward
@@ -257,24 +270,27 @@ def train(args=None):
                 loss = dqn.learn(BATCH_SIZE)
             t += 1
 
+        # print(actions_value)
+        print(loss)
         steps_list[avg_counter] = t  # 该局步数
         reward_list[avg_counter] = ep_reward  # 累计回报
         print(ep_reward)
         if not info["crashed"]:
-            success_eps += 1  # 平均成功率
+            success_list[avg_counter] = 1  # 成功记录
         ep_speed = ep_speed / t  # 平均速度
         speed_list[avg_counter] = ep_speed
         laneChange_list[avg_counter] = ep_laneChange
         avg_counter += 1
         if (i + 1) % avg_len == 0:
-            # 记录平均指标数据
+            # 指针
             avg_counter = 0
+        if (i + 1) % 4 == 0:
+            # 每4局记录平均指标数据
             avg_steps = np.mean(steps_list)
             log_file.write(str(avg_steps) + '\n')
             avg_reward = np.mean(reward_list)
             log_file.write(str(avg_reward) + '\n')
-            log_file.write(str(success_eps / avg_len) + '\n')
-            success_eps = 0
+            log_file.write(str(sum(success_list) / avg_len) + '\n')
             avg_speed = np.mean(speed_list)
             log_file.write(str(avg_speed) + '\n')
             avg_laneChange = np.mean(laneChange_list)
@@ -282,7 +298,7 @@ def train(args=None):
 
     # if (i + 1) % 100 == 0:
     #     dqn.save("models\\DQN_3action_{}.pt".format((i+1)//100))
-    dqn.save(".\\models\\DQN_3action_fast_v1.pt")
+    dqn.save(".\\models\\DQN_5action_fast_v7.pt")
     log_file.close()
 
 if __name__ == "__main__":
